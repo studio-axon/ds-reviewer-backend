@@ -1,7 +1,7 @@
 // api/review.js — Backend Vercel para o DS Reviewer
-// Deploy: vercel deploy (precisa de ANTHROPIC_API_KEY nas env vars)
+// Usando Google Gemini (gratuito) — para migrar pro Claude, veja comentário no final
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ─── Design System — Studio Axon ─────────────────────────────────────────────
 // Tokens extraídos via Figma MCP do arquivo UI Kit - Axon
@@ -169,7 +169,7 @@ function preFilter(nodes) {
   return issues;
 }
 
-// ─── Prompt para o Claude ────────────────────────────────────────────────────
+// ─── Prompt para o Gemini ────────────────────────────────────────────────────
 
 function buildPrompt(rawIssues, nodes, checks) {
   return `Você é um especialista em Design Systems fazendo revisão de um projeto Figma.
@@ -230,26 +230,28 @@ export default async function handler(req, res) {
     return res.json({ issues: [] });
   }
 
-  // 2. Claude enriquece as mensagens
+  // 2. Gemini enriquece as mensagens (gratuito)
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(rawIssues, nodes, checks),
-        },
-      ],
-    });
-
-    const text = response.content[0]?.text ?? "";
+    const result = await model.generateContent(buildPrompt(rawIssues, nodes, checks));
+    const text = result.response.text();
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
 
     return res.json({ issues: parsed.issues ?? [] });
+
+    // ── Para migrar pro Claude no futuro, substitua o bloco acima por: ──
+    // import Anthropic from "@anthropic-ai/sdk";
+    // const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    // const response = await client.messages.create({
+    //   model: "claude-sonnet-4-20250514",
+    //   max_tokens: 2048,
+    //   messages: [{ role: "user", content: buildPrompt(rawIssues, nodes, checks) }],
+    // });
+    // const text = response.content[0]?.text ?? "";
+    // ────────────────────────────────────────────────────────────────────
   } catch (err) {
     console.error("Erro ao chamar Claude:", err);
     // Fallback: retorna issues sem enriquecimento
