@@ -104,7 +104,10 @@ Retorne APENAS um JSON válido neste formato, sem texto adicional:
     // ── MCP Figma ─────────────────────────────────────────────────────────────
     } else if (source === "mcp") {
       if (!figmaFileKey) return res.status(400).json({ error: "Figma file key não informado" });
-      if (!process.env.FIGMA_TOKEN) return res.status(400).json({ error: "FIGMA_TOKEN não configurado na Vercel" });
+
+      // Usa o token do usuário se enviado; caso contrário usa o token do servidor (fallback)
+      const tokenToUse = figmaToken || process.env.FIGMA_TOKEN;
+      if (!tokenToUse) return res.status(400).json({ error: "Figma Token não configurado. Acesse Config no plugin e adicione seu token." });
 
       // Busca styles e variables via Figma REST API
       const [stylesRes, varsRes] = await Promise.all([
