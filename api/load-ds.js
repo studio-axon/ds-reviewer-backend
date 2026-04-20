@@ -1,0 +1,164 @@
+// api/load-ds.js — Processa o Design System enviado pelo plugin
+// Aceita: PDF (base64), URL ou Figma file key via MCP
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
+
+  const { source, pdfBase64, url, figmaFileKey } = req.body ?? {};
+
+  if (!source) return res.status(400).json({ error: "Campo 'source' obrigatório" });
+
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  let rawContent = "";
+
+  try {
+    // ── PDF ──────────────────────────────────────────────────────────────────
+    if (source === "pdf") {
+      if (!pdfBase64) return res.status(400).json({ error: "PDF não enviado" });
+
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: "application/pdf",
+            data: pdfBase64,
+          },
+        },
+        `Você é um especialista em Design Systems. Analise este PDF e extraia:
+1. Nome do Design System
+2. Todas as cores (nome e valor hex)
+3. Tipografia: famílias de fonte, tamanhos permitidos, pesos
+4. Espaçamentos: base do grid, valores permitidos
+5. Quaisquer regras adicionais de consistência
+
+Retorne APENAS um JSON válido neste formato exato, sem texto adicional:
+{
+  "name": "Nome do DS",
+  "colors": { "nome-token": "#hexvalue" },
+  "colorTolerance": 15,
+  "spacing": {
+    "gridBase": 8,
+    "allowedValues": [0, 4, 8, 16, 24, 32, 48, 64],
+    "tolerance": 1
+  },
+  "typography": {
+    "allowedFamilies": ["NomeDaFonte"],
+    "allowedSizes": [12, 14, 16, 20, 24, 32],
+    "allowedWeights": [400, 500, 600, 700],
+    "textStyles": {}
+  }
+}`,
+      ]);
+
+      rawContent = result.response.text();
+
+    // ── URL ──────────────────────────────────────────────────────────────────
+    } else if (source === "url") {
+      if (!url) return res.status(400).json({ error: "URL não informada" });
+
+      // Busca o conteúdo da página
+      const pageRes = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 DS-Reviewer-Bot" },
+      });
+      const html = await pageRes.text();
+      // Remove tags HTML para reduzir tokens
+      const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 15000);
+
+      const result = await model.generateContent(
+        `Você é um especialista em Design Systems. Analise o conteúdo desta documentação e extraia:
+1. Nome do Design System
+2. Todas as cores (nome e valor hex)
+3. Tipografia: famílias de fonte, tamanhos permitidos, pesos
+4. Espaçamentos: base do grid, valores permitidos
+
+Conteúdo da página:
+${text}
+
+Retorne APENAS um JSON válido neste formato, sem texto adicional:
+{
+  "name": "Nome do DS",
+  "colors": { "nome-token": "#hexvalue" },
+  "colorTolerance": 15,
+  "spacing": {
+    "gridBase": 8,
+    "allowedValues": [0, 4, 8, 16, 24, 32, 48, 64],
+    "tolerance": 1
+  },
+  "typography": {
+    "allowedFamilies": ["NomeDaFonte"],
+    "allowedSizes": [12, 14, 16, 20, 24, 32],
+    "allowedWeights": [400, 500, 600, 700],
+    "textStyles": {}
+  }
+}`
+      );
+      rawContent = result.response.text();
+
+    // ── MCP Figma ─────────────────────────────────────────────────────────────
+    } else if (source === "mcp") {
+      if (!figmaFileKey) return res.status(400).json({ error: "Figma file key não informado" });
+      if (!process.env.FIGMA_TOKEN) return res.status(400).json({ error: "FIGMA_TOKEN não configurado na Vercel" });
+
+      // Busca styles e variables via Figma REST API
+      const [stylesRes, varsRes] = await Promise.all([
+        fetch(`https://api.figma.com/v1/files/${figmaFileKey}/styles`, {
+          headers: { "X-Figma-Token": process.env.FIGMA_TOKEN },
+        }),
+        fetch(`https://api.figma.com/v1/files/${figmaFileKey}/variables/local`, {
+          headers: { "X-Figma-Token": process.env.FIGMA_TOKEN },
+        }),
+      ]);
+
+      const stylesData = await stylesRes.json();
+      const varsData   = await varsRes.json();
+
+      const figmaContent = JSON.stringify({ styles: stylesData, variables: varsData }).slice(0, 20000);
+
+      const result = await model.generateContent(
+        `Você é um especialista em Design Systems Figma. Analise estes dados de estilos e variáveis do Figma e extraia os tokens de design.
+
+Dados do arquivo Figma:
+${figmaContent}
+
+Retorne APENAS um JSON válido neste formato, sem texto adicional:
+{
+  "name": "Nome do DS",
+  "colors": { "nome-token": "#hexvalue" },
+  "colorTolerance": 15,
+  "spacing": {
+    "gridBase": 8,
+    "allowedValues": [0, 4, 8, 16, 24, 32, 48, 64],
+    "tolerance": 1
+  },
+  "typography": {
+    "allowedFamilies": ["NomeDaFonte"],
+    "allowedSizes": [12, 14, 16, 20, 24, 32],
+    "allowedWeights": [400, 500, 600, 700],
+    "textStyles": {}
+  }
+}`
+      );
+      rawContent = result.response.text();
+
+    } else {
+      return res.status(400).json({ error: "Source inválido: use 'pdf', 'url' ou 'mcp'" });
+    }
+
+    // Parse do JSON retornado pelo Gemini
+    const clean = rawContent.replace(/```json|```/g, "").trim();
+    const designSystem = JSON.parse(clean);
+
+    return res.json({ designSystem });
+
+  } catch (err) {
+    console.error("Erro ao processar DS:", err);
+    return res.status(500).json({ error: "Erro ao processar Design System: " + err.message });
+  }
+}
