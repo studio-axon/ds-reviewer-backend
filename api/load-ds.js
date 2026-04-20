@@ -10,12 +10,12 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
-  const { source, pdfBase64, url, figmaFileKey } = req.body ?? {};
+  const { source, pdfBase64, url, figmaFileKey, figmaToken } = req.body ?? {};
 
   if (!source) return res.status(400).json({ error: "Campo 'source' obrigatório" });
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   let rawContent = "";
 
@@ -112,10 +112,10 @@ Retorne APENAS um JSON válido neste formato, sem texto adicional:
       // Busca styles e variables via Figma REST API
       const [stylesRes, varsRes] = await Promise.all([
         fetch(`https://api.figma.com/v1/files/${figmaFileKey}/styles`, {
-          headers: { "X-Figma-Token": process.env.FIGMA_TOKEN },
+          headers: { "X-Figma-Token": tokenToUse },
         }),
         fetch(`https://api.figma.com/v1/files/${figmaFileKey}/variables/local`, {
-          headers: { "X-Figma-Token": process.env.FIGMA_TOKEN },
+          headers: { "X-Figma-Token": tokenToUse },
         }),
       ]);
 
