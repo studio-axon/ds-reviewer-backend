@@ -209,7 +209,13 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Método não permitido" });
 
-  const { nodes = [], checks = {} } = req.body ?? {};
+  const body = req.body || {};
+  const nodes = body.nodes || [];
+  const checks = body.checks || {};
+  const dsData = body.dsData || null;
+
+  // Se o plugin enviou um DS customizado, usa ele; senão usa o DS padrão
+  if (dsData) Object.assign(DESIGN_SYSTEM, dsData);
 
   if (!nodes.length) {
     return res.status(400).json({ error: "Nenhum nó enviado" });
@@ -240,7 +246,7 @@ export default async function handler(req, res) {
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
 
-    return res.json({ issues: parsed.issues ?? [] });
+    return res.json({ issues: parsed.issues ? parsed.issues : [] });
 
     // ── Para migrar pro Claude no futuro, substitua o bloco acima por: ──
     // import Anthropic from "@anthropic-ai/sdk";
