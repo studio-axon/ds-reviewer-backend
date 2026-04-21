@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   if (!source) return res.status(400).json({ error: "Campo 'source' obrigatório" });
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
   let rawContent = "";
 
