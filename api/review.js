@@ -213,6 +213,8 @@ export default async function handler(req, res) {
   const nodes = body.nodes || [];
   const checks = body.checks || {};
   const dsData = body.dsData || null;
+  const fileKey = body.fileKey || null;
+  const figmaToken = body.figmaToken || null;
 
   // Se o plugin enviou um DS customizado, usa ele; senão usa o DS padrão
   if (dsData) Object.assign(DESIGN_SYSTEM, dsData);
@@ -237,6 +239,7 @@ export default async function handler(req, res) {
   }
 
   // 2. Gemini enriquece as mensagens (gratuito)
+  let enrichedIssues = [];
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -245,28 +248,66 @@ export default async function handler(req, res) {
     const text = result.response.text();
     const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
-
-    return res.json({ issues: parsed.issues ? parsed.issues : [] });
-
-    // ── Para migrar pro Claude no futuro, substitua o bloco acima por: ──
-    // import Anthropic from "@anthropic-ai/sdk";
-    // const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    // const response = await client.messages.create({
-    //   model: "claude-sonnet-4-20250514",
-    //   max_tokens: 2048,
-    //   messages: [{ role: "user", content: buildPrompt(rawIssues, nodes, checks) }],
-    // });
-    // const text = response.content[0]?.text ?? "";
-    // ────────────────────────────────────────────────────────────────────
+    enrichedIssues = parsed.issues ? parsed.issues : [];
   } catch (err) {
-    console.error("Erro ao chamar Claude:", err);
+    console.error("Erro ao chamar Gemini:", err);
     // Fallback: retorna issues sem enriquecimento
-    const fallback = rawIssues.map((i) => ({
+    enrichedIssues = rawIssues.map((i) => ({
       ...i,
       emoji: i.type === "color" ? "🎨" : i.type === "spacing" ? "📐" : "✏️",
       title: i.type === "color" ? "Cor fora do DS" : i.type === "spacing" ? "Espaçamento incorreto" : "Tipografia incorreta",
       message: i.detail,
     }));
-    return res.json({ issues: fallback });
   }
+
+  // 3. Posta comentários via Figma REST API (se token e fileKey disponíveis)
+  let posted = 0;
+  if (figmaToken && fileKey && enrichedIssues.length > 0) {
+    // Mapeia nodeId → absoluteBoundingBox a partir dos nós enviados
+    const nodeMap = {};
+    nodes.forEach(n => { nodeMap[n.id] = n; });
+
+    for (const issue of enrichedIssues) {
+      try {
+        const node = nodeMap[issue.nodeId];
+        if (!node) continue;
+
+        const x = node.x || 0;
+        const y = node.y || 0;
+
+        const body = {
+          message: `[DS Reviewer] ${issue.emoji} ${issue.title}\n${issue.message}`,
+          client_meta: {
+            node_id: issue.nodeId,
+            node_offset: { x: 0, y: 0 },
+          },
+        };
+
+        const commentRes = await fetch(
+          `https://api.figma.com/v1/files/${fileKey}/comments`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Figma-Token": figmaToken,
+            },
+            body: JSON.stringify(body),
+          }
+        );
+
+        if (commentRes.ok) posted++;
+        else {
+          const errText = await commentRes.text();
+          console.warn("Erro ao postar comentário:", errText);
+        }
+
+        // Respeita rate limit da API do Figma (5 req/min no plano free)
+        await new Promise(r => setTimeout(r, 300));
+      } catch (err) {
+        console.warn("Erro ao postar comentário no nó", issue.nodeId, err.message);
+      }
+    }
+  }
+
+  return res.json({ issues: enrichedIssues, posted });
 }
