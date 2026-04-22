@@ -106,11 +106,27 @@ Retorne APENAS um JSON válido neste formato exato, sem texto adicional:
 
       // Busca o conteúdo da página
       const pageRes = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 DS-Reviewer-Bot" },
+        headers: { 
+          "User-Agent": "Mozilla/5.0 (compatible; DS-Reviewer-Bot/1.0)",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
       });
       const html = await pageRes.text();
-      // Remove tags HTML para reduzir tokens
-      const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 15000);
+      
+      // Remove tags HTML e scripts para reduzir tokens
+      const text = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // Detecta se a página é renderizada apenas via JS (Zeroheight, etc.)
+      if (text.length < 200) {
+        return res.status(422).json({ 
+          error: "Esta URL usa renderização JavaScript (Zeroheight, Storybook, etc.) e não pode ser lida diretamente. Por favor, use o PDF do seu DS ou o Figma MCP como fonte." 
+        });
+      }
 
       const result = await model.generateContent(
         `Você é um especialista em Design Systems. Analise o conteúdo desta documentação e extraia:
@@ -120,7 +136,7 @@ Retorne APENAS um JSON válido neste formato exato, sem texto adicional:
 4. Espaçamentos: base do grid, valores permitidos
 
 Conteúdo da página:
-${text}
+${text.slice(0, 15000)}
 
 Retorne APENAS um JSON válido neste formato, sem texto adicional:
 {
