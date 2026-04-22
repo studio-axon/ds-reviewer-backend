@@ -3,6 +3,47 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+// DS Axon embutido — usado como fallback ou quando PDF do Axon é detectado
+const AXON_DS_FALLBACK = {
+  name: "Studio Axon UI Kit",
+  colors: {
+    "Primária/Axon_Cor_Primária":      "#3a2ee5",
+    "Primária/Axon_Cor_Primária-5%":   "#f5f4fe",
+    "Axon-Cor_Primária-1":             "#5271ff",
+    "Neutras/Midnight-100%":           "#292d32",
+    "Neutras/Midnight-90%":            "#3e4246",
+    "Neutras/Midnight-80%":            "#54575b",
+    "Neutras/Midnight-50%":            "#949698",
+    "Neutras/Midnight-30%":            "#bec0c1",
+    "Neutras/Midnight-10%":            "#e9eaea",
+    "Neutras/Midnight-5%":             "#f4f4f5",
+    "Neutras/Midnight-3%":             "#f8f8f9",
+    "Neutras/Branco-100%":             "#ffffff",
+    "Alertas/Error":                   "#e23045",
+    "Alertas/Sucesso":                 "#44cc6e",
+    "Alertas/Alerta":                  "#f4c70c",
+    "text/disabled":                   "#919eab",
+  },
+  colorTolerance: 15,
+  spacing: {
+    gridBase: 8,
+    allowedValues: [0, 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64, 80, 96, 120],
+    tolerance: 1,
+  },
+  typography: {
+    allowedFamilies: ["DM Sans"],
+    allowedSizes: [12, 14, 16, 20, 24, 32, 40, 48],
+    allowedWeights: [400, 500, 600, 700],
+    textStyles: {
+      "H2-Título 24px":     { size: 24, weight: 700 },
+      "Título 16px":        { size: 16, weight: 600 },
+      "Titulo Small 14px":  { size: 14, weight: 700 },
+      "Legenda 12px":       { size: 12, weight: 600 },
+      "Parágrafo 16pt":     { size: 16, weight: 500 },
+    },
+  },
+};
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -162,6 +203,13 @@ Retorne APENAS um JSON válido neste formato, sem texto adicional:
 
   } catch (err) {
     console.error("Erro ao processar DS:", err);
+
+    // Se for erro de quota (429), retorna o DS Axon embutido como fallback
+    if (err.message && (err.message.includes("429") || err.message.includes("quota") || err.message.includes("Too Many Requests"))) {
+      console.log("Quota excedida — retornando DS Axon fallback");
+      return res.json({ designSystem: AXON_DS_FALLBACK, fallback: true });
+    }
+
     return res.status(500).json({ error: "Erro ao processar Design System: " + err.message });
   }
 }
